@@ -1,0 +1,62 @@
+stages:
+  - lint
+  - test
+  - deploy
+  - package
+
+# Job 1: Run static analysis with Ruff
+lint_job:
+  stage: lint
+  image: python:3.11-slim
+  tags:
+    - docker
+  script:
+    - pip install ruff
+    - ruff check .
+
+# Job 2: Run unit tests and measure coverage
+unit_tests_job:
+  stage: test
+  image: python:3.11-slim
+  tags:
+      - docker
+  script:
+    - pip install -r requirements-dev.txt
+    - pytest --cov=. --cov-report=html
+  artifacts:
+    name: "coverage-report-$CI_COMMIT_SHORT_SHA"
+    expire_in: 1 week
+    paths:
+      - htmlcov/
+      
+pages:
+  stage: deploy
+  image: python:3.11-slim
+  tags:
+    - docker
+  script:
+    - pip install -r requirements-dev.txt
+    - pytest --cov=. --cov-report=html
+    # Move the generated HTML report into the mandatory 'public' directory
+    - mv htmlcov public
+  artifacts:
+    paths:
+      - public/
+  only:
+    - main  # Only deploy documentation on pushes to the main branch      
+    
+package_job:
+  stage: package
+  image:
+    name: gcr.io/kaniko-project/executor:v1.14.0-debug
+    entrypoint: [""]
+  tags:
+    - docker
+  script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(mkdir -p /kaniko/.docker && echo -n ${CI_REGISTRY_USER}:${CI_JOB_TOKEN} | base64)\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination "${CI_REGISTRY_IMAGE}:latest"
+      --destination "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"    
